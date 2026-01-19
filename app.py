@@ -5,14 +5,22 @@ from datetime import datetime
 import pandas as pd
 import os
 
-# --- 1. FIREBASE CONNECTION ---
+# --- 1. FIREBASE CONNECTION (ONLINE & LOCAL COMPATIBLE) ---
 if not firebase_admin._apps:
     try:
-        if os.path.exists("firebase_key.json"):
+        # Pehle Streamlit Secrets check karein (Online ke liye)
+        if "firebase" in st.secrets:
+            fb_dict = dict(st.secrets["firebase"])
+            if "\\n" in fb_dict["private_key"]:
+                fb_dict["private_key"] = fb_dict["private_key"].replace("\\n", "\n")
+            cred = credentials.Certificate(fb_dict)
+            firebase_admin.initialize_app(cred)
+        # Agar online na ho toh local file check karein
+        elif os.path.exists("firebase_key.json"):
             cred = credentials.Certificate("firebase_key.json")
             firebase_admin.initialize_app(cred)
         else:
-            st.error("❌ firebase_key.json missing!")
+            st.error("❌ Firebase Credentials (Secrets or JSON) missing!")
     except Exception as e:
         st.error(f"❌ Connection Error: {e}")
 
@@ -106,7 +114,7 @@ else:
     is_admin = (user['role'] == 'admin')
     st.markdown(f"""
         <div style="background-color: #d9534f; padding: 15px; border-radius: 10px; color: white; margin-bottom: 10px; text-align: center;">
-            <h3 style="margin:0;">Weelcome, {user['name']}</h3>
+            <h3 style="margin:0;">Assalamu Alaikum, {user['name']}</h3>
         </div>
     """, unsafe_allow_html=True)
     
@@ -151,6 +159,7 @@ else:
     if tb3.button("🌎 REGION REVIEW", use_container_width=True): st.session_state['tab'] = 'region'
     if tb4.button("📊 ALL OVER REPORTS", use_container_width=True): st.session_state['tab'] = 'reports'
 
+    # --- TAB 1: JAMIA DATA ---
     if st.session_state['tab'] == 'jamia':
         if is_admin:
             with st.form("jamia_form"):
@@ -166,8 +175,6 @@ else:
                 i1, i2, i3, i4 = st.columns(4)
                 f_gsb, f_mab, f_dpc, f_dpa = i1.number_input("GSB", value=v('gsb')), i2.number_input("MAB", value=v('mab')), i3.number_input("DP Cash", value=v('dp_cash')), i4.number_input("DP Ashiya", value=v('dp_ashiya'))
                 f_stcc, f_stca = i1.number_input("Staff Cash", value=v('staff_cash')), i2.number_input("Staff Ashiya", value=v('staff_ashiya'))
-                
-                # --- RAMZAN & TELETHON FOR ADMIN ---
                 st.markdown('<div class="section-head">🌙 RAMZAN & 📞 TELETHON COLLECTION</div>', unsafe_allow_html=True)
                 c_ram, c_tel = st.columns(2)
                 f_ram = c_ram.number_input("Ramzan Amount", value=rf)
@@ -201,6 +208,55 @@ else:
             i3.number_input("Ramzan (Fixed)", value=rf, disabled=True)
             i4.number_input("Telethon (Fixed)", value=tf, disabled=True)
 
+    # --- TAB 2: ZIMMADARAN WORK ---
+    elif st.session_state['tab'] == 'zimmadar':
+        st.markdown('<div class="section-head">👤 ZIMMADARAN MONITORING & INPUTS</div>', unsafe_allow_html=True)
+        
+        # Admin select karsakta hai, Zimmadar sirf apna dekhega
+        if is_admin:
+            z_view = st.radio("Select Category:", ["Qirat (Qari Akbar)", "Asri (Chand Sir)", "Promotion (Bahauddin)"], horizontal=True)
+        else:
+            tit = user['title'].upper()
+            if "QIRAAT" in tit: z_view = "Qirat (Qari Akbar)"
+            elif "ASRI" in tit: z_view = "Asri (Chand Sir)"
+            elif "PROMOTER" in tit or "STATE" in tit: z_view = "Promotion (Bahauddin)"
+            else: z_view = "View Only"
+
+        if z_view == "Qirat (Qari Akbar)":
+            st.markdown("### 📖 Shoba-e-Qiraat: Jaiza Form")
+            with st.form("z_q_form"):
+                zj = st.selectbox("Jamia:", j_list)
+                zd = st.selectbox("Darja:", ["Ula", "Saniya", "Salisa", "Rabiya", "Hamisa", "Sadisa"])
+                f1, f2, f3 = st.columns(3)
+                z_t = f1.number_input("Total Talba", min_value=0)
+                z_p = f2.number_input("Pass", min_value=0)
+                z_f = f3.number_input("Fail", min_value=0)
+                z_rem = st.text_area("Observations:")
+                if st.form_submit_button("SUBMIT QIRAT DATA"):
+                    db.collection("z_qirat").add({"date":m_key, "jamia":zj, "darja":zd, "total":z_t, "pass":z_p, "fail":z_f, "remarks":z_rem})
+                    st.success("Report Saved!")
+
+        elif z_view == "Asri (Chand Sir)":
+            st.markdown("### 🎓 Asri Education (English/Math)")
+            with st.form("z_a_form"):
+                aj = st.selectbox("Jamia:", j_list)
+                asub = st.selectbox("Subject:", ["English", "Math", "Science"])
+                aperf = st.slider("Performance %", 0, 100, 70)
+                arem = st.text_area("Nazim Feedback:")
+                if st.form_submit_button("SAVE ASRI DATA"):
+                    db.collection("z_asri").add({"date":m_key, "jamia":aj, "subject":asub, "score":aperf, "remarks":arem})
+                    st.success("Asri Data Saved!")
+
+        elif z_view == "Promotion (Bahauddin)":
+            st.markdown("### 🚀 State Promotion & Growth")
+            with st.form("z_p_form"):
+                pj = st.selectbox("Target Jamia:", j_list)
+                pstat = st.select_slider("Current Status:", options=["Critical", "Slow", "Steady", "Growth", "Excellent"])
+                if st.form_submit_button("UPDATE STATUS"):
+                    db.collection("z_promo").add({"date":m_key, "jamia":pj, "status":pstat})
+                    st.success("Promotion Update Saved!")
+
+    # --- TAB 3: REGION REVIEW ---
     elif st.session_state['tab'] == 'region' and is_admin:
         inc_f = ['gsb', 'mab', 'dp_cash', 'dp_ashiya', 'staff_cash', 'staff_ashiya']
         exp_f = ['salary', 'rent', 'electric', 'kitchen', 'travel', 'other_exp']
